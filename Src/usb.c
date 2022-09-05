@@ -1,5 +1,6 @@
 #include "usb.h"
 #include "stm32g441xx.h"
+#include "usb_config.h"
 
 #define __USB_MEM __attribute__((section(".usbbuf")))
 #define __USBBUF_BEGIN 0x40006000
@@ -13,6 +14,20 @@ typedef struct {
     unsigned short COUNT_RX;
 } USB_BTABLE_ENTRY;
 
+typedef struct {
+    unsigned char RequestType;
+    unsigned char Request;
+    union {
+        unsigned short Value;
+        struct {
+            unsigned char DescriptorIndex;
+            unsigned char DescriptorType;
+        };
+    };
+    unsigned short Index;
+    unsigned short Length;
+} USB_SETUP_PACKET;
+
 __ALIGNED(8)
 __USB_MEM
 __IO static USB_BTABLE_ENTRY BTable[8] = {0};
@@ -21,8 +36,11 @@ __ALIGNED(2)
 __USB_MEM
 __IO static char EP0_Buf[2][64] = {0};
 
+static void USB_CopyMemory(volatile short *source, volatile short *target, short length);
 static void USB_ClearSRAM();
 static void USB_SetEP(short *ep, short value, short mask);
+static void USB_HandleControl();
+static void USB_HandleSetup(USB_SETUP_PACKET *setup);
 
 void USB_Init() {
     // Initialize the NVIC
@@ -70,7 +88,19 @@ void USB_LP_IRQHandler() {
         // Enable USB functionality and set address to 0
         USB->DADDR = USB_DADDR_EF;
     } else if ((USB->ISTR & USB_ISTR_CTR) != 0) {
-        __BKPT();
+        if ((USB->ISTR & USB_ISTR_EP_ID) == 0) {
+            USB_HandleControl();
+        }
+    }
+}
+
+static void USB_CopyMemory(volatile short *source, volatile short *target, short length) {
+    for (int i = 0; i < length / 2; i++) {
+        target[i] = source[i];
+    }
+
+    if (length % 2 == 1) {
+        target[length - 1] = source[length - 1];
     }
 }
 
@@ -92,4 +122,38 @@ static void USB_SetEP(short *ep, short value, short mask) {
     short wr2 = rw & ((*ep & ~mask) | value);
 
     *ep = wr0 | wr1 | wr2;
+}
+
+static void USB_HandleControl() {
+    if (USB->EP0R & USB_EP_CTR_RX) {
+        // We received a control message
+        if (USB->EP0R & USB_EP_SETUP) {
+            USB_SETUP_PACKET *setup = EP0_Buf[0];
+            USB_HandleSetup(setup);
+        }
+
+        USB_SetEP(&USB->EP0R, USB_EP_RX_VALID, USB_EP_CTR_RX | USB_EP_RX_VALID);
+    }
+
+    if (USB->EP0R & USB_EP_CTR_TX) {
+        // We just sent a control message
+        USB_SetEP(&USB->EP0R, 0x00, USB_EP_CTR_TX);
+    }
+}
+
+static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
+    if ((setup->RequestType & 0x0F) == 0) { // Device Requests
+        switch (setup->Request) {
+        case 0x05: // Set Address
+            __BKPT();
+            break;
+        case 0x06: { // Get Descriptor
+            USB_DESCRIPTOR_DEVICE *descriptor = USB_GetDeviceDescriptor();
+            USB_CopyMemory(descriptor, EP0_Buf[1], sizeof(USB_DESCRIPTOR_DEVICE));
+            BTable[0].COUNT_TX = sizeof(USB_DESCRIPTOR_DEVICE);
+
+            USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+        } break;
+        }
+    }
 }
