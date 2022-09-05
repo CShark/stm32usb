@@ -47,6 +47,7 @@ MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 32K
   FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 128K
+  USBRAM  (rw)    : ORIGIN = 0x40006000, LENGTH = 1K
 }
 
 /* Sections */
@@ -173,6 +174,12 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+
+  .usbbuffer :
+  {
+    *(.usbbuf)
+    *(.usbbuf*)
+  } > USBRAM
 
   /* Remove information from the compiler libraries */
   /DISCARD/ :
