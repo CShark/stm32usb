@@ -1,4 +1,5 @@
 #include "main.h"
+#include "usb.h"
 
 static void InitClock();
 
@@ -8,6 +9,7 @@ static void InitClock();
  */
 int main(void) {
     InitClock();
+    USB_Init();
 
     while (1) {
     }
