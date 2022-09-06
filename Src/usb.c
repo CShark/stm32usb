@@ -6,6 +6,7 @@
 #define __USBBUF_BEGIN 0x40006000
 #define __MEM2USB(X) (((int)X - __USBBUF_BEGIN))
 #define __USB2MEM(X) (((int)X + __USBBUF_BEGIN))
+#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 typedef struct {
     unsigned short ADDR_TX;
@@ -29,7 +30,14 @@ typedef struct {
 } USB_SETUP_PACKET;
 
 typedef struct {
+    unsigned short Length;
+    unsigned short BytesSent;
+    unsigned char *Buffer;
+} USB_TRANSFER_STATE;
+
+typedef struct {
     USB_SETUP_PACKET Setup;
+    USB_TRANSFER_STATE Transfer;
 } USB_CONTROL_STATE;
 
 __ALIGNED(8)
@@ -47,6 +55,7 @@ static void USB_ClearSRAM();
 static void USB_SetEP(short *ep, short value, short mask);
 static void USB_HandleControl();
 static void USB_HandleSetup(USB_SETUP_PACKET *setup);
+static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *txBuffer, short *txBufferCount, short txBufferSize);
 
 void USB_Init() {
     // Initialize the NVIC
@@ -147,12 +156,20 @@ static void USB_HandleControl() {
             USB->DADDR = USB_DADDR_EF | ControlState.Setup.Value;
         }
 
+        // check for running transfers
+        if (ControlState.Transfer.Length > 0) {
+            if (ControlState.Transfer.Length > ControlState.Transfer.BytesSent) {
+                USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1], &BTable[0].COUNT_TX, 64);
+            }
+        }
+
         USB_SetEP(&USB->EP0R, 0x00, USB_EP_CTR_TX);
     }
 }
 
 static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
     USB_CopyMemory(setup, &ControlState.Setup, sizeof(USB_SETUP_PACKET));
+    ControlState.Transfer.Length = 0;
 
     if ((setup->RequestType & 0x0F) == 0) { // Device Requests
         switch (setup->Request) {
@@ -160,13 +177,37 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
             BTable[0].COUNT_TX = 0;
             USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
             break;
-        case 0x06: { // Get Descriptor
-            USB_DESCRIPTOR_DEVICE *descriptor = USB_GetDeviceDescriptor();
-            USB_CopyMemory(descriptor, EP0_Buf[1], sizeof(USB_DESCRIPTOR_DEVICE));
-            BTable[0].COUNT_TX = sizeof(USB_DESCRIPTOR_DEVICE);
+        case 0x06: // Get Descriptor
+            switch (setup->DescriptorType) {
+            case 0x01: { // Device Descriptor
+                USB_DESCRIPTOR_DEVICE *descriptor = USB_GetDeviceDescriptor();
+                USB_CopyMemory(descriptor, EP0_Buf[1], sizeof(USB_DESCRIPTOR_DEVICE));
+                BTable[0].COUNT_TX = sizeof(USB_DESCRIPTOR_DEVICE);
 
-            USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
-        } break;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            } break;
+            case 0x02: { // Configuration Descriptor
+                short length;
+                char *descriptor = USB_GetConfigDescriptor(&length);
+                ControlState.Transfer.Buffer = descriptor;
+                ControlState.Transfer.BytesSent = 0;
+                ControlState.Transfer.Length = MIN(length, setup->Length);
+
+                USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1], &BTable[0].COUNT_TX, 64);
+            }
+            }
+            break;
         }
+    }
+}
+
+static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *txBuffer, short *txBufferCount, short txBufferSize) {
+    *txBufferCount = MIN(txBufferSize, transfer->Length - transfer->BytesSent);
+    if (*txBufferCount > 0) {
+        USB_CopyMemory(transfer->Buffer + transfer->BytesSent, txBuffer, *txBufferCount);
+        transfer->BytesSent += *txBufferCount;
+        USB_SetEP(ep, USB_EP_TX_VALID, USB_EP_TX_VALID);
+    } else {
+        USB_SetEP(ep, USB_EP_TX_NAK, USB_EP_TX_VALID);
     }
 }
