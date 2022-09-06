@@ -28,6 +28,10 @@ typedef struct {
     unsigned short Length;
 } USB_SETUP_PACKET;
 
+typedef struct {
+    USB_SETUP_PACKET Setup;
+} USB_CONTROL_STATE;
+
 __ALIGNED(8)
 __USB_MEM
 __IO static USB_BTABLE_ENTRY BTable[8] = {0};
@@ -35,6 +39,8 @@ __IO static USB_BTABLE_ENTRY BTable[8] = {0};
 __ALIGNED(2)
 __USB_MEM
 __IO static char EP0_Buf[2][64] = {0};
+
+static USB_CONTROL_STATE ControlState;
 
 static void USB_CopyMemory(volatile short *source, volatile short *target, short length);
 static void USB_ClearSRAM();
@@ -137,15 +143,22 @@ static void USB_HandleControl() {
 
     if (USB->EP0R & USB_EP_CTR_TX) {
         // We just sent a control message
+        if (ControlState.Setup.Request == 0x05) {
+            USB->DADDR = USB_DADDR_EF | ControlState.Setup.Value;
+        }
+
         USB_SetEP(&USB->EP0R, 0x00, USB_EP_CTR_TX);
     }
 }
 
 static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
+    USB_CopyMemory(setup, &ControlState.Setup, sizeof(USB_SETUP_PACKET));
+
     if ((setup->RequestType & 0x0F) == 0) { // Device Requests
         switch (setup->Request) {
         case 0x05: // Set Address
-            __BKPT();
+            BTable[0].COUNT_TX = 0;
+            USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
             break;
         case 0x06: { // Get Descriptor
             USB_DESCRIPTOR_DEVICE *descriptor = USB_GetDeviceDescriptor();
