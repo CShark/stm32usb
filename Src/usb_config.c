@@ -68,7 +68,7 @@ static void AddToDescriptor(char *data, short length, short *offset) {
 }
 
 char *USB_GetConfigDescriptor(short *length) {
-    if(ConfigurationBuffer[0] == 0) {
+    if (ConfigurationBuffer[0] == 0) {
         short offset = 0;
         AddToDescriptor(&ConfigDescriptor, ConfigDescriptor.Length, &offset);
         AddToDescriptor(&InterfaceDescriptors[0], InterfaceDescriptors[0].Length, &offset);
@@ -78,4 +78,12 @@ char *USB_GetConfigDescriptor(short *length) {
 
     *length = sizeof(ConfigurationBuffer);
     return ConfigurationBuffer;
+}
+
+__weak void USB_SuspendDevice() {
+
+}
+
+__weak void USB_WakeupDevice(){
+    
 }

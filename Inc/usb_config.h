@@ -1,6 +1,10 @@
 #ifndef __USB_CONFIG_H
 #define __USB_CONFIG_H
 
+#ifndef __weak
+#define __weak __attribute__((weak))
+#endif
+
 typedef struct {
     unsigned char Length;
     unsigned char Type;
@@ -50,7 +54,14 @@ typedef struct {
     unsigned char Interval;
 } USB_DESCRIPTOR_ENDPOINT;
 
+#define USB_SelfPowered 0
+#define USB_NumInterfaces 1
+#define USB_NumEndpoints 2 // Config + 1 Bidirectional
+
 USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor();
 char *USB_GetConfigDescriptor(short *length);
+
+void USB_SuspendDevice();
+void USB_WakeupDevice();
 
 #endif

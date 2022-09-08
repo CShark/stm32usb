@@ -49,6 +49,9 @@ __USB_MEM
 __IO static char EP0_Buf[2][64] = {0};
 
 static USB_CONTROL_STATE ControlState;
+static char ActiveConfiguration = 0x00;
+static char DeviceState = 0x00; // 0 - Default, 1 - Address, 2 - Configured
+static char EndpointState[USB_NumEndpoints] = {0};
 
 static void USB_CopyMemory(volatile short *source, volatile short *target, short length);
 static void USB_ClearSRAM();
@@ -74,7 +77,7 @@ void USB_Init() {
     SysTick->CTRL = 0;
 
     // Enable all interrupts & the internal pullup to put 1.5K on D+ for FullSpeed USB
-    USB->CNTR |= USB_CNTR_RESETM | USB_CNTR_CTRM | USB_CNTR_WKUPM | USB_CNTR_SUSPM | USB_CNTR_ESOFM | USB_CNTR_ERRM | USB_CNTR_L1REQM | USB_CNTR_SOFM;
+    USB->CNTR |= USB_CNTR_RESETM | USB_CNTR_CTRM | USB_CNTR_WKUPM | USB_CNTR_SUSPM;
     USB->BCDR |= USB_BCDR_DPPU;
 
     // Clear the USB Reset (D+ & D- low) to start enumeration
@@ -101,11 +104,27 @@ void USB_LP_IRQHandler() {
         USB_SetEP(&USB->EP0R, USB_EP_CONTROL | USB_EP_RX_VALID | USB_EP_TX_NAK, USB_EP_TYPE_MASK | USB_EP_RX_VALID | USB_EP_TX_VALID);
 
         // Enable USB functionality and set address to 0
+        DeviceState = 0;
         USB->DADDR = USB_DADDR_EF;
     } else if ((USB->ISTR & USB_ISTR_CTR) != 0) {
         if ((USB->ISTR & USB_ISTR_EP_ID) == 0) {
             USB_HandleControl();
         }
+    } else if((USB->ISTR & USB_ISTR_SUSP) != 0){
+    	USB->ISTR = ~USB_ISTR_SUSP;
+        USB_SuspendDevice();
+        
+        // On Suspend, the device should enter low power mode and turn off the USB-Peripheral
+        USB->CNTR |= USB_CNTR_FSUSP;
+
+        // If the device still needs power from the USB Host
+        USB->CNTR |= USB_CNTR_LPMODE;        
+    } else if((USB->ISTR & USB_CLR_WKUP) != 0) {
+    	USB->ISTR = ~USB_ISTR_WKUP;
+
+        // Resume peripheral
+        USB->CNTR &= ~(USB_CNTR_FSUSP | USB_CNTR_LPMODE);
+        USB_WakeupDevice();
     }
 }
 
@@ -173,9 +192,27 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
 
     if ((setup->RequestType & 0x0F) == 0) { // Device Requests
         switch (setup->Request) {
-        case 0x05: // Set Address
+        case 0x00: // Get Status
+            EP0_Buf[1][0] = USB_SelfPowered;
+            EP0_Buf[1][1] = 0x00;
+            BTable[0].COUNT_TX = 2;
+            USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            break;
+        case 0x01: // Clear Feature
+            USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            break;
+        case 0x03: // Set Feature
             BTable[0].COUNT_TX = 0;
             USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            break;
+        case 0x05: // Set Address
+            if (DeviceState == 0 || DeviceState == 1) {
+                BTable[0].COUNT_TX = 0;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                DeviceState = 1;
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
             break;
         case 0x06: // Get Descriptor
             switch (setup->DescriptorType) {
@@ -196,6 +233,137 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
                 USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1], &BTable[0].COUNT_TX, 64);
             }
             }
+            break;
+        case 0x07: // Set Descriptor
+            // Allows the Host to alter the descriptor. Not supported
+            USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            break;
+        case 0x08: // Get Configuration
+            if (DeviceState == 1 || DeviceState == 2) {
+                if (DeviceState == 1) {
+                    ActiveConfiguration = 0;
+                }
+
+                EP0_Buf[1][0] = ActiveConfiguration;
+                BTable[0].COUNT_TX = 1;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x09: // Set Configuration
+            if (DeviceState == 1 || DeviceState == 2) {
+                BTable[0].COUNT_TX = 0;
+                switch (setup->Value & 0xFF) {
+                case 0:
+                    DeviceState = 1;
+                    ActiveConfiguration = 0;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                    break;
+                case 1:
+                    DeviceState = 2;
+                    ActiveConfiguration = 1;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                    break;
+                default:
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+                    break;
+                }
+
+                if (DeviceState == 2) {
+                    USB_SetEP(&USB->EP1R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP2R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP3R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP4R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP5R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP6R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                    USB_SetEP(&USB->EP7R, 0x00, USB_EP_DTOG_RX | USB_EP_DTOG_TX);
+                }
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        }
+    } else if ((setup->RequestType & 0x0F) == 0x01) { // Interface requests
+        switch (setup->Request) {
+        case 0x00: // Get Status
+            if (DeviceState == 2) {
+                EP0_Buf[1][0] = 0x00;
+                EP0_Buf[1][1] = 0x00;
+                BTable[0].COUNT_TX = 2;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x01: // Clear Feature
+            USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            break;
+        case 0x03: // Set Feature
+            USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            break;
+        case 0x0A: // Get Interface
+            if (DeviceState == 2 && setup->Index < USB_NumInterfaces) {
+                EP0_Buf[1][0] = 0x00;
+                BTable[0].COUNT_TX = 1;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x11: // Set Interface
+            if (DeviceState == 2 && setup->Index < USB_NumInterfaces && EP0_Buf[0][0] == 0x00) {
+                BTable[0].COUNT_TX = 0;
+                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        }
+    } else if ((setup->RequestType & 0x0F) == 0x02) { // Endpoint requests
+        switch (setup->Request) {
+        case 0x00: // Get Status
+            if ((DeviceState == 2 || (DeviceState == 1 && setup->Index == 0x00)) && setup->Index < USB_NumEndpoints) {
+                if (setup->Value == 0x00) {
+                    EP0_Buf[1][0] = EndpointState[setup->Index];
+                    EP0_Buf[1][1] = 0x00;
+                    BTable[0].COUNT_TX = 2;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                } else {
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+                }
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x01: // Clear Feature
+            if ((DeviceState == 2 || (DeviceState == 1 && setup->Index == 0x00)) && setup->Index < USB_NumEndpoints) {
+                if (setup->Value == 0x00) {
+                    EndpointState[setup->Index] = 0;
+                    BTable[0].COUNT_TX = 0;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                } else {
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+                }
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x03: // Set Feature
+            if ((DeviceState == 2 || (DeviceState == 1 && setup->Index == 0x00)) && setup->Index < USB_NumEndpoints) {
+                if (setup->Value == 0x00) {
+                    EndpointState[setup->Index] = 1;
+                    BTable[0].COUNT_TX = 0;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                } else {
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+                }
+            } else {
+                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            }
+            break;
+        case 0x12: // Sync Frame
+            USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
             break;
         }
     }
