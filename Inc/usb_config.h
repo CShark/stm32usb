@@ -1,9 +1,17 @@
 #ifndef __USB_CONFIG_H
 #define __USB_CONFIG_H
 
+#include "usb.h"
+
 #ifndef __weak
 #define __weak __attribute__((weak))
 #endif
+
+#pragma pack(1)
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+} USB_DESCRIPTOR_STRINGS;
 
 typedef struct {
     unsigned char Length;
@@ -54,14 +62,74 @@ typedef struct {
     unsigned char Interval;
 } USB_DESCRIPTOR_ENDPOINT;
 
+// CDC120 Table 15
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned short CDCVersion;
+} USB_DESC_FUNC_HEADER;
+
+// CDC120 Table 16
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned char ControlInterface;
+    unsigned char SubInterface0;
+} USB_DESC_FUNC_UNION1;
+
+// PSTN120 Table 3
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned char Capabilities;
+    unsigned char DataInterface;
+} USB_DESC_FUNC_CallManagement;
+
+// PSTN120 Table 4
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned char Capabilities;
+} USB_DESC_FUNC_ACM;
+
+#pragma pack()
+
+// ===================================================
+
 #define USB_SelfPowered 0
 #define USB_NumInterfaces 1
 #define USB_NumEndpoints 2 // Config + 1 Bidirectional
+#define USB_MaxControlData 64
 
+/// @brief Get the device descriptor
 USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor();
+/// @brief Get the complete descriptor
+/// @param length A pointer which will contain the length of the descriptor
 char *USB_GetConfigDescriptor(short *length);
+/// @brief Get a string from the string table (str... entries)
+/// @param index The index of the string
+/// @param lcid The language code of the string
+/// @param length Will contain the length of the string
+char *USB_GetString(char index, short lcid, short *length);
+/// @brief Get the OS Descriptor (String descriptor at 0xEE)
+/// @param length Will contain the length of the descriptor
+char *USB_GetOSDescriptor(short *length);
+/// @brief Configure all endpoints used by the configuration
+void USB_ConfigureEndpoints();
 
+/// @brief Handle a setup packet that is targeted at an interface or class
+/// @param setup The setup packet
+/// @param data A pointer to data that was sent with the setup
+/// @param length The length of the data
+char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char* data, short length);
+
+/// @brief Suspend the device and go into low power mode
 void USB_SuspendDevice();
+/// @brief Reactivate the device
 void USB_WakeupDevice();
 
 #endif
