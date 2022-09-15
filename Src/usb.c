@@ -278,7 +278,7 @@ static void USB_HandleControl() {
 }
 
 static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
-    if ((setup->RequestType & 0x60) != 0) {
+    if ((setup->RequestType & 0x60) != 0 || (setup->RequestType & 0x1F) != 0) {
         // Class and interface setup packets are redirected to the class specific implementation
         char ret = USB_HandleClassSetup(setup, ControlState.Receive.Buffer, ControlState.Receive.Length);
 

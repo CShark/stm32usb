@@ -96,6 +96,17 @@ typedef struct {
     unsigned char Capabilities;
 } USB_DESC_FUNC_ACM;
 
+// HID Descriptors, see HID1_11
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned short HidVersion;
+    unsigned char CountryCode;
+    unsigned char Descriptors;
+    unsigned char Desc0Type;
+    unsigned short Desc0Length;
+} USB_DESC_FUNC_HID;
+
 #pragma pack()
 
 // ===================================================
@@ -125,7 +136,7 @@ void USB_ConfigureEndpoints();
 /// @param setup The setup packet
 /// @param data A pointer to data that was sent with the setup
 /// @param length The length of the data
-char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char* data, short length);
+char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length);
 
 /// @brief Suspend the device and go into low power mode
 void USB_SuspendDevice();

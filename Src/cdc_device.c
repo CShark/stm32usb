@@ -1,7 +1,7 @@
 #include "cdc_device.h"
 
-char buffer[64];
-char lineCoding[7];
+static char buffer[64];
+static char lineCoding[7];
 
 char CDC_SetupPacket(USB_SETUP_PACKET *setup, char *data, short length) {
     // Windows requires us to remember the line coding
