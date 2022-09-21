@@ -2,7 +2,7 @@
 
 static char buffer[33];
 
-void HID_HandlePacket(short length) {
+void HID_HandlePacket(char ep, short length) {
     USB_Fetch(1, buffer, &length);
 }
 
