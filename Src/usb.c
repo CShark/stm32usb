@@ -30,7 +30,7 @@ typedef struct {
 typedef struct {
     char *Buffer;
     char Size;
-    void (*CompleteCallback)(short length);
+    void (*CompleteCallback)(char ep, short length);
 } USB_BufferConfig;
 
 __ALIGNED(8)
@@ -74,9 +74,9 @@ static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *t
 
 void USB_Init() {
     // Initialize the NVIC
-    NVIC_SetPriority(USB_LP_IRQn, 0);
+    NVIC_SetPriority(USB_LP_IRQn, 8);
     NVIC_EnableIRQ(USB_LP_IRQn);
-    NVIC_SetPriority(USB_HP_IRQn, 0);
+    NVIC_SetPriority(USB_HP_IRQn, 8);
     NVIC_EnableIRQ(USB_HP_IRQn);
 
     ControlState.Receive.Buffer = ControlDataBuffer;
@@ -109,7 +109,7 @@ void USB_HP_IRQHandler() {
             // On RX, call the registered callback if available
             if ((*(&USB->EP0R + ep * 2) & USB_EP_CTR_RX) != 0) {
                 if (Buffers[ep * 2].CompleteCallback != 0) {
-                    Buffers[ep * 2].CompleteCallback(BTable[ep].COUNT_RX & 0x01FF);
+                    Buffers[ep * 2].CompleteCallback(ep, BTable[ep].COUNT_RX & 0x01FF);
                 }
 
                 USB_SetEP(&USB->EP0R + ep * 2, USB_EP_RX_VALID, USB_EP_CTR_RX | USB_EP_RX_VALID);
@@ -119,12 +119,20 @@ void USB_HP_IRQHandler() {
             if ((*(&USB->EP0R + ep * 2) & USB_EP_CTR_TX) != 0) {
                 if (Transfers[ep - 1].Length > 0) {
                     if (Transfers[ep - 1].Length > Transfers[ep - 1].BytesSent) {
-                        USB_PrepareTransfer(&Transfers[ep - 1], &USB->EP0R + ep * 2, &Buffers[ep * 2 + 1].Buffer, &BTable[ep].COUNT_TX, Buffers[ep * 2 + 1].Size);
+                        USB_PrepareTransfer(&Transfers[ep - 1], &USB->EP0R + ep * 2, Buffers[ep * 2 + 1].Buffer, &BTable[ep].COUNT_TX, Buffers[ep * 2 + 1].Size);
                     } else if (Transfers[ep - 1].Length == Transfers[ep - 1].BytesSent) {
-                        // if complete, add one empty packet to flush queue
-                        BTable[ep].COUNT_TX = 0;
-                        USB_SetEP(&USB->EP0R + ep * 2, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                        char length = Transfers[ep - 1].Length;
                         Transfers[ep - 1].Length = 0;
+
+                        if (Buffers[ep * 2 + 1].CompleteCallback != 0) {
+                            Buffers[ep * 2 + 1].CompleteCallback(ep, length);
+                        }
+
+                        // if complete and no new TX, add one empty packet to flush queue, send tx complete signal
+                        if (Transfers[ep - 1].Length == 0) {
+                            BTable[ep].COUNT_TX = 0;
+                            USB_SetEP(&USB->EP0R + ep * 2, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                        }
                     }
                 }
 
@@ -557,6 +565,9 @@ static void USB_DistributeBuffers() {
         if (Buffers[i].Size > 0) {
             Buffers[i].Buffer = addr;
             addr += Buffers[i].Size;
+
+            if (addr & 0x01)
+                addr++;
         } else {
             Buffers[i].Buffer = 0x00;
         }
@@ -565,31 +576,39 @@ static void USB_DistributeBuffers() {
 
 void USB_SetEPConfig(USB_CONFIG_EP config) {
     if (config.EP > 0 && config.EP < 8) {
+        unsigned char rxSize = config.RxBufferSize;
+        unsigned char txSize = config.TxBufferSize;
+
+        if (rxSize & 0x01)
+            rxSize++;
+        if (txSize & 0x01)
+            txSize++;
+
         Buffers[config.EP * 2].Size = config.RxBufferSize;
         Buffers[config.EP * 2 + 1].Size = config.TxBufferSize;
         Buffers[config.EP * 2].CompleteCallback = config.RxCallback;
-        Buffers[config.EP * 2 + 1].CompleteCallback = 0;
+        Buffers[config.EP * 2 + 1].CompleteCallback = config.TxCallback;
         USB_DistributeBuffers();
 
-        if (config.RxBufferSize > 0) {
+        if (rxSize > 0) {
             BTable[config.EP].ADDR_RX = __MEM2USB(Buffers[config.EP * 2].Buffer);
         }
-        if (config.TxBufferSize > 0) {
+        if (txSize > 0) {
             BTable[config.EP].ADDR_TX = __MEM2USB(Buffers[config.EP * 2 + 1].Buffer);
         }
 
         BTable[config.EP].COUNT_TX = 0;
-        if (config.RxBufferSize < 64) {
-            BTable[config.EP].COUNT_RX = (config.RxBufferSize / 2) << 10;
+        if (rxSize < 64) {
+            BTable[config.EP].COUNT_RX = (rxSize / 2) << 10;
         } else {
-            BTable[config.EP].COUNT_RX = (1 << 15) | (((config.RxBufferSize / 32) - 1) << 10);
+            BTable[config.EP].COUNT_RX = (1 << 15) | (((rxSize / 32) - 1) << 10);
         }
 
         // only allow to set ep type & kind
         short epConfig = config.Type & 0x0700;
         epConfig |= USB_EP_TX_NAK;
         epConfig |= config.EP;
-        if (config.RxBufferSize > 0) {
+        if (rxSize > 0) {
             epConfig |= USB_EP_RX_VALID;
         }
 

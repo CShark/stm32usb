@@ -20,7 +20,8 @@ typedef struct {
     unsigned char RxBufferSize;
     unsigned char TxBufferSize;
     unsigned short Type;
-    void (*RxCallback)(short length);
+    void (*RxCallback)(char ep, short length);
+    void (*TxCallback)(char ep, short length);
 } USB_CONFIG_EP;
 
 #define USB_OK 0

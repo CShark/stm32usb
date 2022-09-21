@@ -62,6 +62,17 @@ typedef struct {
     unsigned char Interval;
 } USB_DESCRIPTOR_ENDPOINT;
 
+typedef struct {
+    unsigned char Length;
+    unsigned char DescriptorType;
+    unsigned char FirstInterface;
+    unsigned char InterfaceCount;
+    unsigned char Class;
+    unsigned char SubClass;
+    unsigned char Protocol;
+    unsigned char strFunction;
+} USB_FUNC_IAD;
+
 // CDC120 Table 15
 typedef struct {
     unsigned char Length;
