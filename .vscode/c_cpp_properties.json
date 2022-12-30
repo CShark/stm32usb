@@ -3,7 +3,9 @@
         {
             "name": "Win32",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/eth/Inc",
+                "${workspaceFolder}/lwip/src/include"
             ],
             "defines": [
                 "_DEBUG",

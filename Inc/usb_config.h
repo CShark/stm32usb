@@ -7,6 +7,16 @@
 #define __weak __attribute__((weak))
 #endif
 
+#define CS_INTERFACE 0x24
+#define CS_ENDPOINT 0x25
+
+#define FUNC_HEADER 0x00
+#define FUNC_CALL 0x01
+#define FUNC_ACM 0x02
+#define FUNC_UNION 0x06
+#define FUNC_NCM 0x1A
+#define FUNC_ECM 0x0F
+
 #pragma pack(1)
 typedef struct {
     unsigned char Length;
@@ -90,6 +100,27 @@ typedef struct {
     unsigned char SubInterface0;
 } USB_DESC_FUNC_UNION1;
 
+// ECM120 Table 3
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned char strMacAddress;
+    unsigned int EthernetStatistics;
+    unsigned short MaxSegmentSize;
+    unsigned short NumberMcFilters;
+    unsigned char NumberPowerFilters;
+} USB_DESC_FUNC_ECM;
+
+// NCM10 Table 5-2
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned short NcmVersion;
+    unsigned char NetworkCapabilities;
+} USB_DESC_FUNC_NCM;
+
 // PSTN120 Table 3
 typedef struct {
     unsigned char Length;
@@ -123,8 +154,8 @@ typedef struct {
 // ===================================================
 
 #define USB_SelfPowered 0
-#define USB_NumInterfaces 1
-#define USB_NumEndpoints 2 // Config + 1 Bidirectional
+#define USB_NumInterfaces 2
+#define USB_NumEndpoints 3 // Config + 1 Bidirectional
 #define USB_MaxControlData 64
 
 /// @brief Get the device descriptor
@@ -148,6 +179,11 @@ void USB_ConfigureEndpoints();
 /// @param data A pointer to data that was sent with the setup
 /// @param length The length of the data
 char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length);
+
+/// @brief Called when the host triggers a SetInterface to choose an alternate id
+/// @param interface The interface id that was triggered
+/// @param alternateId The new alternate id that was activated
+void USB_ResetClass(char interface, char alternateId);
 
 /// @brief Suspend the device and go into low power mode
 void USB_SuspendDevice();

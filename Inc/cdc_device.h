@@ -9,6 +9,6 @@
 #define CDC_CONFIG_CONTROLLINESTATE 0x22
 
 char CDC_SetupPacket(USB_SETUP_PACKET *setup, char* data, short length);
-void CDC_HandlePacket(short length);
+void CDC_HandlePacket(char ep, short length);
 
 #endif

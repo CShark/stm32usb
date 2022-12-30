@@ -3,6 +3,12 @@
         "main.h": "c",
         "stm32g4xx.h": "c",
         "stm32g441xx.h": "c",
-        "usb.h": "c"
-    }
+        "usb.h": "c",
+        "opt.h": "c",
+        "lwipopts.h": "c",
+        "debug.h": "c",
+        "typeinfo": "c",
+        "limits": "c"
+    },
+    "cmake.configureOnOpen": false
 }
