@@ -59,7 +59,7 @@ static const USB_DESC_FUNC_ECM FuncETH = {
     .Length = 13,
     .Type = CS_INTERFACE,
     .SubType = FUNC_ECM,
-    .MaxSegmentSize = 256,
+    .MaxSegmentSize = 1514,
     .strMacAddress = 20};
 
 static const USB_DESC_FUNC_NCM FuncNCM = {
@@ -184,7 +184,7 @@ void USB_ConfigureEndpoints() {
     // Configure all endpoints and route their reception to the functions that need them
     USB_CONFIG_EP IntEP = {
         .EP = 1,
-        .RxBufferSize = 16,
+        .RxBufferSize = 0,
         .TxBufferSize = 16,
         .TxCallback = NCM_ControlTransmit,
         .Type = USB_EP_INTERRUPT};

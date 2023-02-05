@@ -10,9 +10,7 @@
 static struct netif ncm_if;
 
 static void InitClock();
-static void InitSystick();
-
-#define AHBClockSpeed 72 * 1000 * 1000
+static void Systick_Init();
 
 static volatile uint32_t globalTime_ms = 0;
 
@@ -62,7 +60,7 @@ void *memcpy(void *destination, const void *source, size_t num) {
  */
 int main(void) {
     InitClock();
-    InitSystick();
+    Systick_Init();
     USB_Init();
     lwip_init();
 
@@ -109,7 +107,7 @@ static void InitClock() {
     SystemCoreClockUpdate();
 }
 
-static void InitSystick() {
+static void Systick_Init() {
     unsigned int loadVal = SystemCoreClock / 1000 / 8;
 
     if (loadVal == 0) {

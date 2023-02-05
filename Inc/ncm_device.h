@@ -33,12 +33,14 @@ typedef struct {
     unsigned short _reserved;
 } USB_NTB_INPUT_SIZE;
 
+// CDC120 6.3.3
 typedef struct {
     USB_SETUP_PACKET SetupPacket;
     unsigned int DlBitRate;
     unsigned int UlBitRate;
 } USB_NCM_SPEEDDATA;
 
+// NCM10 Table 3-1
 typedef struct {
     unsigned char Signature[4];
     unsigned short HeaderLength;
@@ -47,12 +49,14 @@ typedef struct {
     unsigned short NdpOffset;
 } NCM_NTB_HEADER_16;
 
+// NCM10 Table 3-3
 typedef struct {
     unsigned char Signature[4];
     unsigned short Length;
     unsigned short NextNdpOffset;
 } NCM_NTB_POINTER_16;
 
+// NCM10 Table 3-3
 typedef struct {
     unsigned short DatagramOffset;
     unsigned short DatagramLength;
