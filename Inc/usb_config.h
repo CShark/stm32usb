@@ -2,6 +2,7 @@
 #define __USB_CONFIG_H
 
 #include "usb.h"
+#include "platform.h"
 
 #ifndef __weak
 #define __weak __attribute__((weak))
@@ -120,12 +121,17 @@ typedef struct {
 
 #pragma pack()
 
-// ===================================================
+typedef struct {
+    USB_DESCRIPTOR_DEVICE *(*GetDeviceDescriptor)();
+    char *(*GetConfigDescriptor)(short *);
+    char *(*GetString)(char, short, short *);
+    char *(*GetOSDescriptor)(short *);
+    void (*ConfigureEndpoints)();
+} USB_Implementation;
 
-#define USB_SelfPowered 0
-#define USB_NumInterfaces 1
-#define USB_NumEndpoints 2 // Config + 1 Bidirectional
-#define USB_MaxControlData 64
+/// @brief Set config implementation for example flexibility
+/// @param impl The function calls to use
+void USB_SetImplementation(USB_Implementation impl);
 
 /// @brief Get the device descriptor
 USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor();

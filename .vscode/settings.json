@@ -3,6 +3,9 @@
         "main.h": "c",
         "stm32g4xx.h": "c",
         "stm32g441xx.h": "c",
-        "usb.h": "c"
+        "usb.h": "c",
+        "stdint.h": "c",
+        "hid_config.h": "c",
+        "platform.h": "c"
     }
 }

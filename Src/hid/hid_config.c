@@ -1,8 +1,6 @@
-#include "usb_config.h"
-#include "cdc_device.h"
-#include "hid_device.h"
+#include "hid/hid_config.h"
+#include "hid/hid_device.h"
 
-// Example definition for a Virtual COM Port
 static const USB_DESCRIPTOR_DEVICE DeviceDescriptor = {
     .Length = 18,
     .Type = 0x01,
@@ -115,32 +113,12 @@ static char HIDConfigurationBuffer[] = {
     // End Collection
     0b11000000};
 
-/// @brief A Helper to add a descriptor to the configuration buffer
-/// @param data The raw descriptor data
-/// @param offset The offset in the configuration buffer
-static void AddToDescriptor(char *data, short *offset);
 
-static USB_Implementation implementation = {0};
-
-void USB_SetImplementation(USB_Implementation impl) {
-    implementation = impl;
-}
-
-USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor() {
+static USB_DESCRIPTOR_DEVICE* GetDeviceDescriptor() {
     return &DeviceDescriptor;
 }
 
-static void AddToDescriptor(char *data, short *offset) {
-    short length = data[0];
-
-    for (int i = 0; i < length; i++) {
-        ConfigurationBuffer[i + *offset] = data[i];
-    }
-
-    *offset += length;
-}
-
-char *USB_GetConfigDescriptor(short *length) {
+static char *GetConfigDescriptor(short *length) {
     if (ConfigurationBuffer[0] == 0) {
         short offset = 0;
         AddToDescriptor(&ConfigDescriptor, &offset);
@@ -154,9 +132,7 @@ char *USB_GetConfigDescriptor(short *length) {
     return ConfigurationBuffer;
 }
 
-char *USB_GetString(char index, short lcid, short *length) {
-    // Strings need to be in unicode (thus prefixed with u"...")
-    // The length is double the character count + 2 — or use VSCode which will show the number of bytes on hover
+static char *GetString(char index, short lcid, short *length) {
     if (index == 1) {
         *length = 20;
         return u"Housemade";
@@ -174,12 +150,7 @@ char *USB_GetString(char index, short lcid, short *length) {
     return 0;
 }
 
-char *USB_GetOSDescriptor(short *length) {
-    return 0;
-}
-
-void USB_ConfigureEndpoints() {
-    // Configure all endpoints and route their reception to the functions that need them
+static void ConfigureEndpoints() {
     USB_CONFIG_EP DataEP = {
         .EP = 1,
         .RxBufferSize = 34,
@@ -190,18 +161,10 @@ void USB_ConfigureEndpoints() {
     USB_SetEPConfig(DataEP);
 }
 
-char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length) {
-    // Route the setup packets based on the Interface / Class Index
-    if (setup->Request == HID_CONFIG_GETDESCRIPTOR) {
-        USB_Transmit(0, HIDConfigurationBuffer, sizeof(HIDConfigurationBuffer));
-        return USB_OK;
-    } else {
-        return HID_SetupPacket(setup, data, length);
-    }
-}
-
-__weak void USB_SuspendDevice() {
-}
-
-__weak void USB_WakeupDevice() {
+USB_Implementation HID_GetImplementation() {
+    USB_Implementation impl;
+    impl.GetDeviceDescriptor = &GetDeviceDescriptor;
+    impl.GetConfigDescriptor = &GetConfigDescriptor;
+    impl.GetString = &GetString;
+    impl.ConfigureEndpoints = &ConfigureEndpoints;
 }
