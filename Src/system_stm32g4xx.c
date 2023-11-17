@@ -76,10 +76,11 @@
   * @{
   */
 
+#define STM32G441xx
 #include "stm32g4xx.h"
 
 #if !defined  (HSE_VALUE)
-  #define HSE_VALUE     24000000U /*!< Value of the External oscillator in Hz */
+  #define HSE_VALUE     25000000U /*!< Value of the External oscillator in Hz */
 #endif /* HSE_VALUE */
 
 #if !defined  (HSI_VALUE)
@@ -152,8 +153,8 @@
   */
   uint32_t SystemCoreClock = HSI_VALUE;
 
-  const uint8_t AHBPrescTable[16] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U, 6U, 7U, 8U, 9U};
-  const uint8_t APBPrescTable[8] =  {0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U};
+  const unsigned char AHBPrescTable[16] = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U, 6U, 7U, 8U, 9U};
+  const unsigned char APBPrescTable[8] =  {0U, 0U, 0U, 0U, 1U, 2U, 3U, 4U};
 
 /**
   * @}
@@ -228,7 +229,7 @@ void SystemInit(void)
   */
 void SystemCoreClockUpdate(void)
 {
-  uint32_t tmp, pllvco, pllr, pllsource, pllm;
+  unsigned int tmp, pllvco, pllr, pllsource, pllm;
 
   /* Get SYSCLK source -------------------------------------------------------*/
   switch (RCC->CFGR & RCC_CFGR_SWS)
