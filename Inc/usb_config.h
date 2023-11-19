@@ -1,7 +1,6 @@
 #ifndef __USB_CONFIG_H
 #define __USB_CONFIG_H
 
-#include "usb.h"
 #include "platform.h"
 
 #ifndef __weak
@@ -101,6 +100,27 @@ typedef struct {
     unsigned char SubInterface0;
 } USB_DESC_FUNC_UNION1;
 
+// ECM120 Table 3
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned char strMacAddress;
+    unsigned int EthernetStatistics;
+    unsigned short MaxSegmentSize;
+    unsigned short NumberMcFilters;
+    unsigned char NumberPowerFilters;
+} USB_DESC_FUNC_ECM;
+
+// NCM10 Table 5-2
+typedef struct {
+    unsigned char Length;
+    unsigned char Type;
+    unsigned char SubType;
+    unsigned short NcmVersion;
+    unsigned char NetworkCapabilities;
+} USB_DESC_FUNC_NCM;
+
 // PSTN120 Table 3
 typedef struct {
     unsigned char Length;
@@ -131,48 +151,8 @@ typedef struct {
 
 #pragma pack()
 
-typedef struct {
-    USB_DESCRIPTOR_DEVICE *(*GetDeviceDescriptor)();
-    char *(*GetConfigDescriptor)(short *);
-    char *(*GetString)(char, short, short *);
-    char *(*GetOSDescriptor)(short *);
-    void (*ConfigureEndpoints)();
-} USB_Implementation;
-
-/// @brief Set config implementation for example flexibility
-/// @param impl The function calls to use
-void USB_SetImplementation(USB_Implementation impl);
-
-/// @brief Get the device descriptor
-USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor();
-/// @brief Get the complete descriptor
-/// @param length A pointer which will contain the length of the descriptor
-char *USB_GetConfigDescriptor(short *length);
-/// @brief Get a string from the string table (str... entries)
-/// @param index The index of the string
-/// @param lcid The language code of the string
-/// @param length Will contain the length of the string
-char *USB_GetString(char index, short lcid, short *length);
-/// @brief Get the OS Descriptor (String descriptor at 0xEE)
-/// @param length Will contain the length of the descriptor
-char *USB_GetOSDescriptor(short *length);
-/// @brief Configure all endpoints used by the configuration
-void USB_ConfigureEndpoints();
-
-/// @brief Handle a setup packet that is targeted at an interface or class
-/// @param setup The setup packet
-/// @param data A pointer to data that was sent with the setup
-/// @param length The length of the data
-char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length);
-
-/// @brief Called when the host triggers a SetInterface to choose an alternate id
-/// @param interface The interface id that was triggered
-/// @param alternateId The new alternate id that was activated
-void USB_ResetClass(char interface, char alternateId);
-
-/// @brief Suspend the device and go into low power mode
-void USB_SuspendDevice();
-/// @brief Reactivate the device
-void USB_WakeupDevice();
+#define USB_SelfPowered 0
+#define USB_NumEndpoints 8
+#define USB_MaxControlData 64
 
 #endif

@@ -1,5 +1,5 @@
-#include "ncm_netif.h"
-#include "ncm_device.h"
+#include "ncm/ncm_netif.h"
+#include "ncm/ncm_device.h"
 
 #include <netif/ethernet.h>
 #include <lwip/etharp.h>

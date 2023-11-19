@@ -1,4 +1,4 @@
-#include "ncm_device.h"
+#include "ncm/ncm_device.h"
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 

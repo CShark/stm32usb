@@ -1,4 +1,4 @@
-#include "cdc_device.h"
+#include "cdc/cdc_device.h"
 
 static char buffer[64];
 static char lineCoding[7];

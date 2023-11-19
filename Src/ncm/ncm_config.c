@@ -1,7 +1,10 @@
-#include "usb_config.h"
-#include "cdc_device.h"
-#include "hid_device.h"
-#include "ncm_device.h"
+#include "ncm/ncm_config.h"
+#include "lwip/autoip.h"
+#include "lwip/init.h"
+#include "lwip/netif.h"
+#include "lwip/timeouts.h"
+#include "ncm/ncm_device.h"
+#include "ncm/ncm_netif.h"
 
 // Example definition for a NCM-Device
 static const USB_DESCRIPTOR_DEVICE DeviceDescriptor = {
@@ -69,17 +72,15 @@ static const USB_DESC_FUNC_NCM FuncNCM = {
     .NetworkCapabilities = 0b10000};
 
 static const USB_DESCRIPTOR_INTERFACE DataInterfaces[2] = {
-    {
-        .Length = 9,
-        .Type = 0x04,
-        .InterfaceID = 1,
-        .AlternateID = 0,
-        .Endpoints = 0,
-        .Class = 0x0A,
-        .SubClass = 0x00,
-        .Protocol = 0x01,
-        .strInterface = 0,
-    },
+    {.Length = 9,
+     .Type = 0x04,
+     .InterfaceID = 1,
+     .AlternateID = 0,
+     .Endpoints = 0,
+     .Class = 0x0A,
+     .SubClass = 0x00,
+     .Protocol = 0x01,
+     .strInterface = 0},
     {.Length = 9,
      .Type = 0x04,
      .InterfaceID = 1,
@@ -110,55 +111,22 @@ static const USB_DESCRIPTOR_ENDPOINT Endpoints[3] = {
      .MaxPacketSize = 64,
      .Interval = 0}};
 
-// Buffer holding the complete descriptor (except the device one) in the correct order
 static char ConfigurationBuffer[86] = {0};
 
-/// @brief A Helper to add a descriptor to the configuration buffer
-/// @param data The raw descriptor data
-/// @param offset The offset in the configuration buffer
-static void AddToDescriptor(char *data, short *offset);
+static const USB_CONFIG_EP EndpointConfigs[2] = {
+    {.EP = 1,
+     .RxBufferSize = 0,
+     .TxBufferSize = 16,
+     .TxCallback = NCM_ControlTransmit,
+     .Type = USB_EP_INTERRUPT},
+    {.EP = 2,
+     .RxBufferSize = 64,
+     .TxBufferSize = 64,
+     .RxCallback = NCM_HandlePacket,
+     .TxCallback = NCM_BufferTransmitted,
+     .Type = USB_EP_BULK}};
 
-static USB_Implementation implementation = {0};
-
-void USB_SetImplementation(USB_Implementation impl) {
-    implementation = impl;
-}
-
-USB_DESCRIPTOR_DEVICE *USB_GetDeviceDescriptor() {
-    return &DeviceDescriptor;
-}
-
-static void AddToDescriptor(char *data, short *offset) {
-    short length = data[0];
-
-    for (int i = 0; i < length; i++) {
-        ConfigurationBuffer[i + *offset] = data[i];
-    }
-
-    *offset += length;
-}
-
-char *USB_GetConfigDescriptor(short *length) {
-    if (ConfigurationBuffer[0] == 0) {
-        short offset = 0;
-        AddToDescriptor(&ConfigDescriptor, &offset);
-        AddToDescriptor(&NCMInterface, &offset);
-        AddToDescriptor(&FuncHeader, &offset);
-        AddToDescriptor(&FuncUnion, &offset);
-        AddToDescriptor(&FuncETH, &offset);
-        AddToDescriptor(&FuncNCM, &offset);
-        AddToDescriptor(&Endpoints[0], &offset);
-        AddToDescriptor(&DataInterfaces[0], &offset);
-        AddToDescriptor(&DataInterfaces[1], &offset);
-        AddToDescriptor(&Endpoints[1], &offset);
-        AddToDescriptor(&Endpoints[2], &offset);
-    }
-
-    *length = sizeof(ConfigurationBuffer);
-    return ConfigurationBuffer;
-}
-
-char *USB_GetString(char index, short lcid, short *length) {
+static char *GetString(char index, short lcid, short *length) {
     // Strings need to be in unicode (thus prefixed with u"...")
     // The length is double the character count + 2 — or use VSCode which will show the number of bytes on hover
     if (index == 1) {
@@ -167,7 +135,7 @@ char *USB_GetString(char index, short lcid, short *length) {
     } else if (index == 2) {
         *length = 36;
         return u"My DMX Controller";
-    } else if(index == 3) {
+    } else if (index == 3) {
         *length = 22;
         return u"01234-6786";
     } else if (index == 4) {
@@ -181,43 +149,66 @@ char *USB_GetString(char index, short lcid, short *length) {
     return 0;
 }
 
-char *USB_GetOSDescriptor(short *length) {
-    return 0;
-}
-
-void USB_ConfigureEndpoints() {
-    // Configure all endpoints and route their reception to the functions that need them
-    USB_CONFIG_EP IntEP = {
-        .EP = 1,
-        .RxBufferSize = 0,
-        .TxBufferSize = 16,
-        .TxCallback = NCM_ControlTransmit,
-        .Type = USB_EP_INTERRUPT};
-
-    USB_SetEPConfig(IntEP);
-
-    USB_CONFIG_EP DataEp = {
-        .EP = 2,
-        .RxBufferSize = 64,
-        .TxBufferSize = 64,
-        .RxCallback = NCM_HandlePacket,
-        .TxCallback = NCM_BufferTransmitted,
-        .Type = USB_EP_BULK};
-
-    USB_SetEPConfig(DataEp);
-}
-
-char USB_HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length) {
+static char HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length) {
     // Route the setup packets based on the Interface / Class Index
-	NCM_SetupPacket(setup, data, length);
+    NCM_SetupPacket(setup, data, length);
 }
 
-void USB_ResetClass(char interface, char alternateId) {
+static void ResetClass(char interface, char alternateId) {
     NCM_Reset(interface, alternateId);
 }
 
-__weak void USB_SuspendDevice() {
+USB_Implementation NCM_GetImplementation() {
+    USB_Implementation impl = {0};
+
+    unsigned short len = USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 11,
+                                             (void *[]){
+                                                 &ConfigDescriptor,
+                                                 &NCMInterface,
+                                                 &FuncHeader,
+                                                 &FuncUnion,
+                                                 &FuncETH,
+                                                 &FuncNCM,
+                                                 &Endpoints[0],
+                                                 &DataInterfaces[0],
+                                                 &DataInterfaces[1],
+                                                 &Endpoints[1],
+                                                 &Endpoints[2],
+                                             });
+
+    impl.DeviceDescriptor = &DeviceDescriptor;
+    impl.ConfigDescriptor = ConfigurationBuffer;
+    impl.ConfigDescriptorLength = len;
+
+    impl.Endpoints = EndpointConfigs;
+    impl.NumEndpoints = 2;
+    impl.NumInterfaces = 2;
+
+    impl.GetString = &GetString;
+    impl.ResetInterface_Handler = &ResetClass;
+    impl.SetupPacket_Handler = &HandleClassSetup;
+
+    return impl;
 }
 
-__weak void USB_WakeupDevice() {
+// NCM features
+static struct netif ncm_if;
+
+void NCM_Init() {
+    lwip_init();
+
+    netif_add(&ncm_if, IP4_ADDR_ANY, IP4_ADDR_ANY, IP4_ADDR_ANY, NULL, ncm_netif_init, netif_input);
+    netif_set_default(&ncm_if);
+    netif_set_up(&ncm_if);
+
+    autoip_start(&ncm_if);
+}
+
+void NCM_Loop() {
+    ncm_netif_poll(&ncm_if);
+    sys_check_timeouts();
+
+    if (sys_now() % 500 == 0) {
+        NCM_FlushTx();
+    }
 }

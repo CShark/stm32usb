@@ -1,12 +1,15 @@
 #include "usb.h"
-#include "stm32g441xx.h"
-#include "usb_config.h"
+#include "platform.h"
 
 #define __USB_MEM __attribute__((section(".usbbuf")))
 #define __USBBUF_BEGIN 0x40006000
 #define __MEM2USB(X) (((int)X - __USBBUF_BEGIN))
 #define __USB2MEM(X) (((int)X + __USBBUF_BEGIN))
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+
+#ifdef USB_TXTIMEOUT
+extern unsigned int sys_now();
+#endif
 
 typedef struct {
     unsigned short ADDR_TX;
@@ -18,19 +21,31 @@ typedef struct {
 typedef struct {
     unsigned short Length;
     unsigned short BytesSent;
-    unsigned char *Buffer;
+#ifdef USB_TXTIMEOUT
+    unsigned int Timeout;
+#endif
+    const unsigned char *Buffer;
 } USB_TRANSFER_STATE;
+
+typedef struct {
+    unsigned short Length;
+    unsigned short BytesSent;
+#ifdef USB_TXTIMEOUT
+    unsigned int Timeout;
+#endif
+    unsigned char *Buffer;
+} USB_RECEIVE_STATE;
 
 typedef struct {
     USB_SETUP_PACKET Setup;
     USB_TRANSFER_STATE Transfer;
-    USB_TRANSFER_STATE Receive;
+    USB_RECEIVE_STATE Receive;
 } USB_CONTROL_STATE;
 
 typedef struct {
-    char *Buffer;
+    volatile unsigned char *Buffer;
     char Size;
-    void (*CompleteCallback)(char ep, short length);
+    void (*CompleteCallback)(unsigned char ep, short length);
 } USB_BufferConfig;
 
 __ALIGNED(8)
@@ -39,7 +54,7 @@ __IO static USB_BTABLE_ENTRY BTable[8] = {0};
 
 __ALIGNED(2)
 __USB_MEM
-__IO static char EP0_Buf[2][64] = {0};
+__IO static unsigned char EP0_Buf[2][64] = {0};
 
 static USB_BufferConfig Buffers[16] = {0};
 
@@ -49,17 +64,18 @@ static char ActiveConfiguration = 0x00;
 static char DeviceState = 0x00; // 0 - Default, 1 - Address, 2 - Configured
 static char EndpointState[USB_NumEndpoints] = {0};
 
-static char ControlDataBuffer[USB_MaxControlData] = {0};
+static unsigned char ControlDataBuffer[USB_MaxControlData] = {0};
+static USB_Implementation implementation = {0};
 
 /// @brief Copy data from / to USB-SRAM
-static void USB_CopyMemory(volatile short *source, volatile short *target, short length);
+static void USB_CopyMemory(const volatile unsigned char *source, volatile unsigned char *target, short length);
 /// @brief Clear the USB-SRAM to 0
 static void USB_ClearSRAM();
 /// @brief Set an EPn-Register
 /// @param ep Pointer to the EPnR to edit
 /// @param value The values to set for this register
 /// @param mask A mask of bits which should be changed
-static void USB_SetEP(short *ep, short value, short mask);
+static void USB_SetEP(volatile unsigned short *ep, short value, short mask);
 /// @brief Called to handle EP0-messages
 static void USB_HandleControl();
 /// @brief Called to handle Setup-Packets on EP0
@@ -70,11 +86,13 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup);
 /// @param txBuffer The TX-Buffer to copy the transmission to
 /// @param txBufferCount The Register that should contain the number of bytes to send
 /// @param txBufferSize The size of the TX-Buffer
-static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *txBuffer, short *txBufferCount, short txBufferSize);
+static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, volatile unsigned short *ep, volatile unsigned char *txBuffer, volatile unsigned short *txBufferCount, const unsigned short txBufferSize);
 
 void delay_ms(unsigned int ms);
 
-void USB_Init() {
+void USB_Init(USB_Implementation impl) {
+    implementation = impl;
+
     // Initialize the NVIC
     NVIC_SetPriority(USB_LP_IRQn, 8);
     NVIC_EnableIRQ(USB_LP_IRQn);
@@ -100,7 +118,7 @@ void USB_Init() {
 void USB_HP_IRQHandler() {
     // Only take care of regular transmissions
     if ((USB->ISTR & USB_ISTR_CTR) != 0) {
-        char ep = USB->ISTR & USB_ISTR_EP_ID;
+        unsigned char ep = USB->ISTR & USB_ISTR_EP_ID;
 
         if (ep > 0 && ep < 8) {
             // On RX, call the registered callback if available
@@ -117,7 +135,7 @@ void USB_HP_IRQHandler() {
                 if (Transfers[ep - 1].Length > 0) {
                     if (Transfers[ep - 1].Length > Transfers[ep - 1].BytesSent) {
                         USB_PrepareTransfer(&Transfers[ep - 1], &USB->EP0R + ep * 2, Buffers[ep * 2 + 1].Buffer, &BTable[ep].COUNT_TX, Buffers[ep * 2 + 1].Size);
-                    } else if (Transfers[ep - 1].Length == Transfers[ep - 1].BytesSent) {
+                    } else {
                         char length = Transfers[ep - 1].Length;
                         Transfers[ep - 1].Length = 0;
 
@@ -163,7 +181,9 @@ void USB_LP_IRQHandler() {
         // Prepare for a setup packet (RX = Valid, TX = NAK)
         USB_SetEP(&USB->EP0R, USB_EP_CONTROL | USB_EP_RX_VALID | USB_EP_TX_NAK, USB_EP_TYPE_MASK | USB_EP_RX_VALID | USB_EP_TX_VALID);
 
-        USB_ConfigureEndpoints();
+        for (int i = 0; i < implementation.NumEndpoints; i++) {
+            USB_SetEPConfig(implementation.Endpoints[i]);
+        }
 
         // Enable USB functionality and set address to 0
         DeviceState = 0;
@@ -177,7 +197,9 @@ void USB_LP_IRQHandler() {
         }
     } else if ((USB->ISTR & USB_ISTR_SUSP) != 0) {
         USB->ISTR = ~USB_ISTR_SUSP;
-        USB_SuspendDevice();
+        if (implementation.Suspend_Handler != 0) {
+            implementation.Suspend_Handler();
+        }
 
         // On Suspend, the device should enter low power mode and turn off the USB-Peripheral
         USB->CNTR |= USB_CNTR_FSUSP;
@@ -189,33 +211,47 @@ void USB_LP_IRQHandler() {
 
         // Resume peripheral
         USB->CNTR &= ~(USB_CNTR_FSUSP | USB_CNTR_LPMODE);
-        USB_WakeupDevice();
+        if (implementation.Wakeup_Handler != 0) {
+            implementation.Wakeup_Handler();
+        }
     }
 }
 
-static void USB_CopyMemory(volatile short *source, volatile short *target, short length) {
+static void USB_CopyMemory(const volatile unsigned char *source, volatile unsigned char *target, short length) {
+    volatile unsigned short *dest = (volatile unsigned short *)target;
+    volatile unsigned short *src = (volatile unsigned short *)source;
+
     for (int i = 0; i < length / 2; i++) {
-        target[i] = source[i];
+        dest[i] = src[i];
     }
 
     if (length % 2 == 1) {
-        ((char *)target)[length - 1] = ((char *)source)[length - 1];
+        ((volatile unsigned char *)dest)[length - 1] = ((volatile unsigned char *)src)[length - 1];
     }
 }
 
-static void USB_WriteChars(char byte0, char byte1, volatile short *target) {
-    target[0] = byte0 << 0xFF | byte1;
+static void USB_CopyToUsb(const void *source, volatile unsigned char *target, short length) {
+    USB_CopyMemory((unsigned char *)source, target, length);
+}
+
+static void USB_CopyFromUsb(const volatile unsigned char *source, void *target, short length) {
+    USB_CopyMemory(source, (unsigned char *)target, length);
+}
+
+static void USB_WriteToUSBMemory(const unsigned char byte0, const unsigned char byte1, volatile unsigned char *target) {
+    volatile unsigned short *target_cast = (volatile unsigned short *)target;
+    target_cast[0] = byte0 << 8 | byte1;
 }
 
 static void USB_ClearSRAM() {
-    char *buffer = __USBBUF_BEGIN;
+    volatile unsigned char *buffer = (volatile unsigned char *)__USBBUF_BEGIN;
 
     for (int i = 0; i < 1024; i++) {
         buffer[i] = 0;
     }
 }
 
-static void USB_SetEP(short *ep, short value, short mask) {
+static void USB_SetEP(volatile unsigned short *ep, short value, short mask) {
     short toggle = 0b0111000001110000;
     short rc_w0 = 0b1000000010000000;
     short rw = 0b0000011100001111;
@@ -232,8 +268,8 @@ static void USB_HandleControl() {
         // We received a control message
         if (USB->EP0R & USB_EP_SETUP) {
             // On Setup, ditch all running receptions and start anew
-            USB_SETUP_PACKET *setup = EP0_Buf[0];
-            USB_CopyMemory(setup, &ControlState.Setup, sizeof(USB_SETUP_PACKET));
+            volatile USB_SETUP_PACKET *setup = (USB_SETUP_PACKET *)EP0_Buf[0];
+            USB_CopyFromUsb(EP0_Buf[0], &ControlState.Setup, sizeof(USB_SETUP_PACKET));
             ControlState.Transfer.Length = 0;
             ControlState.Receive.Length = 0;
 
@@ -248,7 +284,7 @@ static void USB_HandleControl() {
             // Check if we are expecting data for a setup-packet. If so, read it and call the Setup-Handler once the transfer is complete
             if (ControlState.Receive.Length > 0) {
                 if (ControlState.Receive.BytesSent < USB_MaxControlData) {
-                    USB_CopyMemory(EP0_Buf[0], ControlState.Receive.Buffer + ControlState.Receive.BytesSent, MIN(USB_MaxControlData - ControlState.Receive.BytesSent, BTable[0].COUNT_RX & 0x1FF));
+                    USB_CopyFromUsb(EP0_Buf[0], (ControlState.Receive.Buffer + ControlState.Receive.BytesSent), MIN(USB_MaxControlData - ControlState.Receive.BytesSent, BTable[0].COUNT_RX & 0x1FF));
                     ControlState.Receive.BytesSent += MIN(USB_MaxControlData - ControlState.Receive.BytesSent, BTable[0].COUNT_RX & 0x1FF);
                 }
 
@@ -274,7 +310,9 @@ static void USB_HandleControl() {
         // check for running transfers
         if (ControlState.Transfer.Length > 0) {
             if (ControlState.Transfer.Length > ControlState.Transfer.BytesSent) {
-                USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1], &BTable[0].COUNT_TX, 64);
+                USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1][0], &BTable[0].COUNT_TX, 64);
+            } else {
+                ControlState.Transfer.Length = 0;
             }
         }
 
@@ -283,18 +321,20 @@ static void USB_HandleControl() {
 }
 
 static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
-    if ((setup->RequestType & 0x60) != 0) {// || (setup->RequestType & 0x1F) != 0) {
+    if ((setup->RequestType & 0x60) != 0) { // || (setup->RequestType & 0x1F) != 0) {
         // Class and interface setup packets are redirected to the class specific implementation
-        char ret = USB_HandleClassSetup(setup, ControlState.Receive.Buffer, ControlState.Receive.Length);
+        if (implementation.SetupPacket_Handler != 0) {
+            char ret = implementation.SetupPacket_Handler(setup, ControlState.Receive.Buffer, ControlState.Receive.Length);
 
-        if ((setup->RequestType & 0x80) == 0) {
-            if (ret == USB_OK) {
-                BTable[0].COUNT_TX = 0;
-                USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
-            } else if (ret == USB_BUSY) {
-                USB_SetEP(&USB->EP0R, USB_EP_TX_NAK, USB_EP_TX_VALID);
-            } else {
-                USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+            if ((setup->RequestType & 0x80) == 0) {
+                if (ret == USB_OK) {
+                    BTable[0].COUNT_TX = 0;
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
+                } else if (ret == USB_BUSY) {
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_NAK, USB_EP_TX_VALID);
+                } else {
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
+                }
             }
         }
     } else if ((setup->RequestType & 0x60) == 0) {
@@ -325,20 +365,20 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
             case 0x06: // Get Descriptor
                 switch (setup->DescriptorType) {
                 case 0x01: { // Device Descriptor
-                    USB_DESCRIPTOR_DEVICE *descriptor = USB_GetDeviceDescriptor();
-                    USB_CopyMemory(descriptor, EP0_Buf[1], sizeof(USB_DESCRIPTOR_DEVICE));
+                    const USB_DESCRIPTOR_DEVICE *descriptor = implementation.DeviceDescriptor;
+                    USB_CopyToUsb(descriptor, EP0_Buf[1], sizeof(USB_DESCRIPTOR_DEVICE));
                     BTable[0].COUNT_TX = sizeof(USB_DESCRIPTOR_DEVICE);
 
                     USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
                 } break;
                 case 0x02: { // Configuration Descriptor
-                    short length;
-                    char *descriptor = USB_GetConfigDescriptor(&length);
+                    unsigned short length = implementation.ConfigDescriptorLength;
+                    unsigned char *descriptor = implementation.ConfigDescriptor;
                     ControlState.Transfer.Buffer = descriptor;
                     ControlState.Transfer.BytesSent = 0;
                     ControlState.Transfer.Length = MIN(length, setup->Length);
 
-                    USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1], &BTable[0].COUNT_TX, 64);
+                    USB_PrepareTransfer(&ControlState.Transfer, &USB->EP0R, &EP0_Buf[1][0], &BTable[0].COUNT_TX, 64);
                 } break;
                 case 0x03:                             // String Descriptor
                     if (setup->DescriptorIndex == 0) { // Get supported Languages
@@ -347,19 +387,23 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
                             .Type = 0x03,
                         };
                         // Don't use prepare transfer, as the variable will become invalid once we leave this block
-                        USB_CopyMemory(&data, EP0_Buf[1], 2);
+                        USB_CopyToUsb(&data, EP0_Buf[1], 2);
                         *((short *)(&EP0_Buf[1][2])) = 0x0409;
 
                         BTable[0].COUNT_TX = 4;
                         USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
                     } else {
-                        short length = 0;
-                        char *data = 0;
+                        unsigned short length = 0;
+                        unsigned char *data = 0;
 
                         if (setup->DescriptorIndex == 0xEE) { // Microsoft OS Descriptor
-                            data = USB_GetOSDescriptor(&length);
+                            if (implementation.GetOSDescriptor != 0) {
+                                data = implementation.GetOSDescriptor(&length);
+                            }
                         } else {
-                            data = USB_GetString(setup->DescriptorIndex, setup->Index, &length);
+                            if (implementation.GetString != 0) {
+                                data = (unsigned char *)implementation.GetString(setup->DescriptorIndex, setup->Index, &length);
+                            }
                         }
 
                         short txLength = length + 2;
@@ -369,13 +413,16 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
                             .Length = length,
                             .Type = 0x03};
 
-                        USB_CopyMemory(data, EP0_Buf[1] + 2, txLength - 2);
+                        USB_CopyToUsb(data, EP0_Buf[1] + 2, txLength - 2);
 
-                        USB_CopyMemory(&header, EP0_Buf[1], 2);
+                        USB_CopyToUsb(&header, EP0_Buf[1], 2);
 
                         BTable->COUNT_TX = txLength;
                         USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
                     }
+                    break;
+                case 0x06: // Device Qualifier Descriptor
+                    USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
                     break;
                 }
                 break;
@@ -433,7 +480,7 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
             switch (setup->Request) {
             case 0x00: // Get Status
                 if (DeviceState == 2) {
-                    USB_WriteChars(0x00, 0x00, EP0_Buf[1]);
+                    USB_WriteToUSBMemory(0x00, 0x00, EP0_Buf[1]);
                     BTable[0].COUNT_TX = 2;
                     USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
                 } else {
@@ -447,7 +494,7 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
                 USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
                 break;
             case 0x0A: // Get Interface
-                if (DeviceState == 2 && setup->Index < USB_NumInterfaces) {
+                if (DeviceState == 2 && setup->Index < implementation.NumInterfaces) {
                     EP0_Buf[1][0] = 0x00;
                     BTable[0].COUNT_TX = 1;
                     USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
@@ -456,10 +503,13 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
                 }
                 break;
             case 0x0B: // Set Interface
-                if (DeviceState == 2 && setup->Index < USB_NumInterfaces) {
+                if (DeviceState == 2 && setup->Index < implementation.NumInterfaces) {
                     BTable[0].COUNT_TX = 0;
                     USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
-                    USB_ResetClass(setup->Index, setup->Value);
+
+                    if (implementation.ResetInterface_Handler != 0) {
+                        implementation.ResetInterface_Handler(setup->Index, setup->Value);
+                    }
                 } else {
                     USB_SetEP(&USB->EP0R, USB_EP_TX_STALL, USB_EP_TX_VALID);
                 }
@@ -470,7 +520,7 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
             case 0x00: // Get Status
                 if ((DeviceState == 2 || (DeviceState == 1 && setup->Index == 0x00)) && setup->Index < USB_NumEndpoints) {
                     if (setup->Value == 0x00) {
-                        USB_WriteChars(EndpointState[setup->Index], 0x00, EP0_Buf[1]);
+                        USB_WriteToUSBMemory(EndpointState[setup->Index], 0x00, EP0_Buf[1]);
                         BTable[0].COUNT_TX = 2;
                         USB_SetEP(&USB->EP0R, USB_EP_TX_VALID, USB_EP_TX_VALID);
                     } else {
@@ -514,9 +564,13 @@ static void USB_HandleSetup(USB_SETUP_PACKET *setup) {
     }
 }
 
-static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *txBuffer, short *txBufferCount, short txBufferSize) {
+static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, volatile unsigned short *ep, volatile unsigned char *txBuffer, volatile unsigned short *txBufferCount, const unsigned short txBufferSize) {
     // Check if there is still data to transmit and if so transmit the next chunk of data
     *txBufferCount = MIN(txBufferSize, transfer->Length - transfer->BytesSent);
+#ifdef USB_TXTIMEOUT
+    transfer->Timeout = sys_now();
+#endif
+
     if (*txBufferCount > 0) {
         USB_CopyMemory(transfer->Buffer + transfer->BytesSent, txBuffer, *txBufferCount);
         transfer->BytesSent += *txBufferCount;
@@ -526,7 +580,7 @@ static void USB_PrepareTransfer(USB_TRANSFER_STATE *transfer, short *ep, char *t
     }
 }
 
-void USB_Transmit(char ep, char *buffer, short length) {
+void USB_Transmit(unsigned char ep, const unsigned char *buffer, short length) {
     // Prepare the transfer metadata and initiate the chunked transfer
     if (ep == 0) {
         ControlState.Transfer.Buffer = buffer;
@@ -541,15 +595,24 @@ void USB_Transmit(char ep, char *buffer, short length) {
     }
 }
 
-char USB_IsTransmitPending(char ep) {
+char USB_IsTransmitPending(unsigned char ep) {
+    USB_TRANSFER_STATE *tx;
     if (ep == 0) {
-        return ControlState.Transfer.Length > 0;
+        tx = &ControlState.Transfer;
     } else {
-        return Transfers[ep - 1].Length > 0;
+        tx = &Transfers[ep - 1];
     }
+
+#ifdef USB_TXTIMEOUT
+    if (sys_now() - tx->Timeout > USB_TXTIMEOUT) {
+        tx->Length = 0;
+    }
+#endif
+
+    return tx->Length > 0;
 }
 
-void USB_Fetch(char ep, char *buffer, short *length) {
+void USB_Fetch(unsigned char ep, unsigned char *buffer, short *length) {
     // Read data from the RX Buffer
     if (ep >= 0 && ep < 8) {
         short rxcount = BTable[ep].COUNT_RX & 0x1FF;
@@ -561,13 +624,13 @@ void USB_Fetch(char ep, char *buffer, short *length) {
 
 static void USB_DistributeBuffers() {
     // This function will organize the USB-SRAM and assign RX- and TX-Buffers
-    int addr = __USBBUF_BEGIN + sizeof(BTable);
+    volatile unsigned char *addr = (volatile unsigned char *)(__USBBUF_BEGIN + sizeof(BTable));
     for (int i = 0; i < 16; i++) {
         if (Buffers[i].Size > 0) {
             Buffers[i].Buffer = addr;
             addr += Buffers[i].Size;
 
-            if (addr & 0x01)
+            if ((unsigned int)addr % 2 != 0)
                 addr++;
         } else {
             Buffers[i].Buffer = 0x00;
@@ -614,5 +677,33 @@ void USB_SetEPConfig(USB_CONFIG_EP config) {
         }
 
         USB_SetEP((&USB->EP0R) + 2 * config.EP, epConfig, USB_EP_DTOG_RX | USB_EP_RX_VALID | USB_EP_TYPE_MASK | USB_EP_KIND | USB_EP_DTOG_TX | USB_EP_TX_VALID | 0x000F);
+    }
+}
+
+void USB_SetImplementation(USB_Implementation impl) {
+    implementation = impl;
+}
+
+unsigned short USB_BuildDescriptor(unsigned char *buffer, unsigned short size, unsigned char num, const void **parts) {
+    unsigned int offset = 0;
+    for (int i = 0; i < num; i++) {
+        char *part = (char *)(parts[i]);
+        unsigned short len = (unsigned short)part[0];
+
+        for (int l = 0; l < len; l++) {
+            if (l + offset < size) {
+                buffer[l + offset] = part[l];
+            } else {
+                break;
+            }
+        }
+
+        offset += len;
+    }
+
+    if (size > offset) {
+        return offset;
+    } else {
+        return size;
     }
 }

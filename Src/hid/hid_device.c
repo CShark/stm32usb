@@ -1,4 +1,4 @@
-#include "hid_device.h"
+#include "hid/hid_device.h"
 
 static char buffer[33];
 

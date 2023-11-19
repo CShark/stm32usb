@@ -113,24 +113,12 @@ static char HIDConfigurationBuffer[] = {
     // End Collection
     0b11000000};
 
-
-static USB_DESCRIPTOR_DEVICE* GetDeviceDescriptor() {
-    return &DeviceDescriptor;
-}
-
-static char *GetConfigDescriptor(short *length) {
-    if (ConfigurationBuffer[0] == 0) {
-        short offset = 0;
-        AddToDescriptor(&ConfigDescriptor, &offset);
-        AddToDescriptor(&HIDInterface, &offset);
-        AddToDescriptor(&HIDDescriptor, &offset);
-        AddToDescriptor(&HIDEndpoints[0], &offset);
-        AddToDescriptor(&HIDEndpoints[1], &offset);
-    }
-
-    *length = sizeof(ConfigurationBuffer);
-    return ConfigurationBuffer;
-}
+static const USB_CONFIG_EP EndpointConfigs[1] = {
+    {.EP = 1,
+     .RxBufferSize = 34,
+     .TxBufferSize = 34,
+     .RxCallback = HID_HandlePacket,
+     .Type = USB_EP_INTERRUPT}};
 
 static char *GetString(char index, short lcid, short *length) {
     if (index == 1) {
@@ -139,10 +127,10 @@ static char *GetString(char index, short lcid, short *length) {
     } else if (index == 2) {
         *length = 36;
         return u"My DMX Controller";
-    } else if(index == 3) {
+    } else if (index == 3) {
         *length = 22;
         return u"01234-6786";
-    }else if(index == 4) {
+    } else if (index == 4) {
         *length = 28;
         return u"DMX Interface";
     }
@@ -150,21 +138,26 @@ static char *GetString(char index, short lcid, short *length) {
     return 0;
 }
 
-static void ConfigureEndpoints() {
-    USB_CONFIG_EP DataEP = {
-        .EP = 1,
-        .RxBufferSize = 34,
-        .TxBufferSize = 34,
-        .RxCallback = HID_HandlePacket,
-        .Type = USB_EP_INTERRUPT};
-
-    USB_SetEPConfig(DataEP);
-}
-
 USB_Implementation HID_GetImplementation() {
-    USB_Implementation impl;
-    impl.GetDeviceDescriptor = &GetDeviceDescriptor;
-    impl.GetConfigDescriptor = &GetConfigDescriptor;
+    USB_Implementation impl = {0};
+    
+    unsigned short len = USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 5,
+                                             (void *[]){
+                                                 &ConfigDescriptor,
+                                                 &HIDInterface,
+                                                 &HIDDescriptor,
+                                                 &HIDEndpoints[0],
+                                                 &HIDEndpoints[1]});
+
+    
+    impl.DeviceDescriptor = &DeviceDescriptor;
+    impl.ConfigDescriptor = ConfigurationBuffer;
+    impl.ConfigDescriptorLength = len;
+
+    impl.Endpoints = EndpointConfigs;
+    impl.NumEndpoints = 1;
+    impl.NumInterfaces = 1;
+
     impl.GetString = &GetString;
-    impl.ConfigureEndpoints = &ConfigureEndpoints;
+    return impl;
 }
