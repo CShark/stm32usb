@@ -17,16 +17,24 @@ int main(void) {
 
     USB_Implementation cdc = CDC_GetImplementation();
     USB_Implementation hid = HID_GetImplementation();
+    /* too large for stm32f0xx implementation
     USB_Implementation ncm = NCM_GetImplementation();
     NCM_Init();
     USB_Init(ncm);
+    */
+    USB_Init(cdc);
 
     while (1) {
+    	/* too large for stm32f0xx implementation
         NCM_Loop();
+        */
     }
 }
 
 static void InitClock() {
+
+#ifdef STM32G441xx
+
     RCC->CR |= RCC_CR_HSEON;
 
     // Configure PLL (R=143.75, Q=47.92)
@@ -49,6 +57,32 @@ static void InitClock() {
 
     while ((RCC->CFGR & RCC_CFGR_SWS_Msk) != RCC_CFGR_SWS_PLL) {
     }
+
+#elif defined(STM32F042x6)
+    // enable HSI48
+    RCC->CR2 |= RCC_CR2_HSI48ON;
+    while (!(RCC->CR2 & RCC_CR2_HSI48RDY)) {};
+
+    // enable CRS for USB-sync
+    RCC->APB1ENR |= RCC_APB1ENR_CRSEN;
+    // reset CRS config
+    CRS->CR = 0;
+    CRS->CFGR = 0;
+    // automatic trimming
+    CRS->CFGR |= CRS_CFGR_SYNCSRC_1;    // USB SOF
+    CRS->CR |= CRS_CR_AUTOTRIMEN | CRS_CR_CEN;
+
+    // select HSI48 as USB clock source
+    RCC->CFGR3 &= ~RCC_CFGR3_USBSW;
+    RCC->CFGR3 |= RCC_CFGR3_USBSW_HSI48;
+
+    // enable GPIOA and USB clocks
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+    RCC->APB1ENR |= RCC_APB1ENR_USBEN;
+
+#else
+#error "Unsupported MCU"
+#endif
 
     SystemCoreClockUpdate();
 }

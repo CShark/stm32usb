@@ -94,10 +94,15 @@ void USB_Init(USB_Implementation impl) {
     implementation = impl;
 
     // Initialize the NVIC
+#ifdef STM32G441xx
     NVIC_SetPriority(USB_LP_IRQn, 8);
     NVIC_EnableIRQ(USB_LP_IRQn);
     NVIC_SetPriority(USB_HP_IRQn, 8);
     NVIC_EnableIRQ(USB_HP_IRQn);
+#elif defined(STM32F042x6)
+    NVIC_SetPriority(USB_IRQn, 1);
+	NVIC_EnableIRQ(USB_IRQn);
+#endif
 
     ControlState.Receive.Buffer = ControlDataBuffer;
 
@@ -114,6 +119,13 @@ void USB_Init(USB_Implementation impl) {
     // Clear the USB Reset (D+ & D- low) to start enumeration
     USB->CNTR &= ~USB_CNTR_FRES;
 }
+
+#ifdef STM32F042x6
+void USB_IRQHandler(void)
+{
+    USB_LP_IRQHandler();
+}
+#endif
 
 void USB_HP_IRQHandler() {
     // Only take care of regular transmissions
