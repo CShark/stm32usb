@@ -126,7 +126,7 @@ static const USB_CONFIG_EP EndpointConfigs[2] = {
      .TxCallback = NCM_BufferTransmitted,
      .Type = USB_EP_BULK}};
 
-static char *GetString(char index, short lcid, short *length) {
+static unsigned short *GetString(char index, short lcid, short *length) {
     // Strings need to be in unicode (thus prefixed with u"...")
     // The length is double the character count + 2 — or use VSCode which will show the number of bytes on hover
     if (index == 1) {
@@ -149,7 +149,7 @@ static char *GetString(char index, short lcid, short *length) {
     return 0;
 }
 
-static char HandleClassSetup(USB_SETUP_PACKET *setup, char *data, short length) {
+static char HandleClassSetup(USB_SETUP_PACKET *setup, const unsigned char *data, short length) {
     // Route the setup packets based on the Interface / Class Index
     NCM_SetupPacket(setup, data, length);
 }
@@ -162,7 +162,7 @@ USB_Implementation NCM_GetImplementation() {
     USB_Implementation impl = {0};
 
     unsigned short len = USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 11,
-                                             (void *[]){
+                                             (const void *[]){
                                                  &ConfigDescriptor,
                                                  &NCMInterface,
                                                  &FuncHeader,

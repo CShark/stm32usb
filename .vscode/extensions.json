@@ -1,0 +1,3 @@
+{
+    "recommendations": ["probe-rs.probe-rs-debugger", "ms-vscode.cmake-tools"]
+}

@@ -1,0 +1,53 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "preLaunchTask": "CMake: build",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "STM32G441",
+            "flashingConfig": {
+                "flashingEnabled": true
+            },
+            "chip": "STM32G441RB",
+            "coreConfigs": [
+                {
+                    "programBinary": "build/Debug/stm32g441.elf",
+                    "svdFile": ".vscode/svd/STM32G441.svd",
+                }
+            ]
+        },
+        {
+            "preLaunchTask": "CMake: build",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "STM32G474",
+            "flashingConfig": {
+                "flashingEnabled": true
+            },
+            "chip": "STM32G474RE",
+            "coreConfigs": [
+                {
+                    "programBinary": "build/Debug/stm32g474.elf",
+                    "svdFile": ".vscode/svd/STM32G474.svd",
+                }
+            ]
+        },
+        {
+            "preLaunchTask": "CMake: build",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "STM32F042",
+            "flashingConfig": {
+                "flashingEnabled": true
+            },
+            "chip": "STM32F042K6",
+            "coreConfigs": [
+                {
+                    "programBinary": "build/Debug/stm32f042.elf",
+                    "svdFile": ".vscode/svd/STM32F0x2.svd",
+                }
+            ]
+        }
+    ]
+}
