@@ -120,7 +120,7 @@ static const USB_CONFIG_EP EndpointConfigs[1] = {
      .RxCallback = HID_HandlePacket,
      .Type = USB_EP_INTERRUPT}};
 
-static char *GetString(char index, short lcid, short *length) {
+static unsigned short *GetString(char index, short lcid, short *length) {
     if (index == 1) {
         *length = 20;
         return u"Housemade";
@@ -142,7 +142,7 @@ USB_Implementation HID_GetImplementation() {
     USB_Implementation impl = {0};
     
     unsigned short len = USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 5,
-                                             (void *[]){
+                                             (const void *[]){
                                                  &ConfigDescriptor,
                                                  &HIDInterface,
                                                  &HIDDescriptor,

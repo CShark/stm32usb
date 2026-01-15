@@ -15,7 +15,7 @@
 #define HID_CLASS_SETPROTOCOL 0x0B
 
 
-void HID_HandlePacket(char ep, short length);
+void HID_HandlePacket(unsigned char ep, short length);
 char HID_SetupPacket(USB_SETUP_PACKET *setup, char *data, short length);
 
 #endif

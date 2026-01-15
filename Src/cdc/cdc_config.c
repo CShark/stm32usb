@@ -115,7 +115,7 @@ static const USB_CONFIG_EP EndpointConfigs[2] = {
 static char *GetConfigDescriptor(short *length) {
     if (ConfigurationBuffer[0] == 0) {
         USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 9,
-                            (void *[]){
+                            (const void *[]){
                                 &ConfigDescriptor,
                                 &CDCManagementInterface,
                                 &CDCFuncHeader,
@@ -131,7 +131,7 @@ static char *GetConfigDescriptor(short *length) {
     return ConfigurationBuffer;
 }
 
-static char *GetString(char index, short lcid, short *length) {
+static unsigned short *GetString(char index, short lcid, short *length) {
     if (index == 1) {
         *length = 10;
         return u"asdf";
@@ -150,7 +150,7 @@ static char SetupPacket_Handler(USB_SETUP_PACKET *setup, const unsigned char *da
 USB_Implementation CDC_GetImplementation() {
     USB_Implementation impl = {0};
     unsigned short len = USB_BuildDescriptor(ConfigurationBuffer, sizeof(ConfigurationBuffer), 9,
-                                             (void *[]){
+                                             (const void *[]){
                                                  &ConfigDescriptor,
                                                  &CDCManagementInterface,
                                                  &CDCFuncHeader,

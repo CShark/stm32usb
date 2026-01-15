@@ -1,4 +1,3 @@
-#include "main.h"
 #include "usb.h"
 
 #include "cdc/cdc_config.h"
@@ -33,7 +32,7 @@ int main(void) {
 
 static void InitClock() {
 
-#ifdef STM32G441xx
+#if defined(STM32G441xx) || defined(STM32G474xx)
 
     RCC->CR |= RCC_CR_HSEON;
 

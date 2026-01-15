@@ -1,14 +1,1 @@
-{
-    "files.associations": {
-        "main.h": "c",
-        "stm32g4xx.h": "c",
-        "stm32g441xx.h": "c",
-        "usb.h": "c",
-        "stdint.h": "c",
-        "hid_config.h": "c",
-        "platform.h": "c",
-        "ncm_netif.h": "c",
-        "usb_config.h": "c",
-        "ncm_config.h": "c"
-    }
-}
+{}

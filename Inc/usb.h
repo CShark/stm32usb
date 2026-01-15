@@ -35,7 +35,7 @@ typedef struct {
     unsigned short NumEndpoints;
     unsigned short NumInterfaces;
 
-    char *(*GetString)(char, short, short *);
+    unsigned short *(*GetString)(char, short, short *);
     char *(*GetOSDescriptor)(short *);
 
     char (*SetupPacket_Handler)(USB_SETUP_PACKET *, const unsigned char *, short);

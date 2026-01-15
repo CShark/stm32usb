@@ -20,7 +20,7 @@ char CDC_SetupPacket(USB_SETUP_PACKET *setup, char *data, short length) {
     }
 }
 
-void CDC_HandlePacket(char ep, short length) {
+void CDC_HandlePacket(unsigned char ep, short length) {
     // Just mirror the text
     USB_Fetch(2, buffer, &length);
 

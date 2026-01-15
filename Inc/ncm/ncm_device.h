@@ -101,9 +101,9 @@ typedef struct {
 } NCM_RX_BufferInfo;
 
 char NCM_SetupPacket(USB_SETUP_PACKET *setup, char *data, short length);
-void NCM_HandlePacket(char ep, short length);
+void NCM_HandlePacket(unsigned char ep, short length);
 void NCM_Reset(char interface, char alternateId);
-void NCM_ControlTransmit(char ep, short length);
+void NCM_ControlTransmit(unsigned char ep, short length);
 
 void NCM_LinkUp();
 void NCM_LinkDown();
@@ -111,6 +111,6 @@ void NCM_LinkDown();
 char *NCM_GetNextRxDatagramBuffer(short *length);
 char *NCM_GetNextTxDatagramBuffer(short length);
 void NCM_FlushTx();
-void NCM_BufferTransmitted(char ep, short length);
+void NCM_BufferTransmitted(unsigned char ep, short length);
 
 #endif
