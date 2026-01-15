@@ -81,7 +81,6 @@
   * @{
   */
 
-#define STM32F042x6
 #include "stm32f0xx.h"
 
 /**

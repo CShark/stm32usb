@@ -76,7 +76,6 @@
   * @{
   */
 
-#define STM32G441xx
 #include "stm32g4xx.h"
 
 #if !defined  (HSE_VALUE)
